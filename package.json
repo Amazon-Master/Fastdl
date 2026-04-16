@@ -1,0 +1,9 @@
+{
+  "name": "abb-rd-pwa",
+  "version": "1.0.0",
+  "description": "AudiobookBay → Real-Debrid iOS PWA",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "cheerio": "^1.0.0"
+  }
+}

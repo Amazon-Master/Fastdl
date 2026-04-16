@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ABB→RD" />
+  <meta name="theme-color" content="#6366f1" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <title>ABB → Real-Debrid</title>
+
+  <!-- Tailwind CDN (swap for local build in production) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: '#6366f1',
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Alpine.js -->
+  <script type="module" src="/app.js"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <style>
+    /* Safe area insets for iPhone notch/home bar */
+    body { padding-bottom: env(safe-area-inset-bottom); }
+    .pb-safe { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+    .pt-safe { padding-top: max(1rem, env(safe-area-inset-top)); }
+  </style>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans" x-data="abbApp()" x-init="init()">
+
+  <!-- ── Notification toast ───────────────────────────────────────────────── -->
+  <div
+    x-show="notification"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0 -translate-y-2"
+    x-transition:enter-end="opacity-100 translate-y-0"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed top-4 inset-x-4 z-50 bg-indigo-600 text-white text-sm px-4 py-3 rounded-xl shadow-lg"
+    x-text="notification"
+  ></div>
+
+  <!-- ── Header ────────────────────────────────────────────────────────────── -->
+  <header class="bg-slate-800 border-b border-slate-700 pt-safe px-4 pb-3 flex items-center gap-3 sticky top-0 z-40">
+    <span class="text-2xl">📚</span>
+    <div>
+      <h1 class="text-base font-semibold leading-tight">ABB → Real-Debrid</h1>
+      <p class="text-xs text-slate-400">AudiobookBay downloader</p>
+    </div>
+    <div class="ml-auto">
+      <template x-if="apiKeySaved">
+        <span class="text-xs bg-green-800 text-green-300 px-2 py-1 rounded-full">🔑 Key set</span>
+      </template>
+      <template x-if="!apiKeySaved">
+        <button @click="tab='settings'" class="text-xs bg-red-800 text-red-300 px-2 py-1 rounded-full">⚠️ Set key</button>
+      </template>
+    </div>
+  </header>
+
+  <!-- ── Main content ───────────────────────────────────────────────────────── -->
+  <main class="max-w-lg mx-auto px-4 pt-4 pb-28">
+
+    <!-- SEARCH TAB -->
+    <section x-show="tab === 'search'">
+      <div class="flex gap-2 mb-4">
+        <input
+          x-model="searchQuery"
+          @keyup.enter="search()"
+          type="search"
+          placeholder="Search audiobooks…"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+          class="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <button
+          @click="search()"
+          :disabled="isSearching"
+          class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-3 rounded-xl text-sm font-medium transition"
+        >
+          <span x-show="!isSearching">Search</span>
+          <span x-show="isSearching">…</span>
+        </button>
+      </div>
+
+      <!-- Error -->
+      <p x-show="searchError" x-text="searchError" class="text-red-400 text-sm mb-4"></p>
+
+      <!-- Results -->
+      <ul class="space-y-2">
+        <template x-for="book in results" :key="book.slug">
+          <li class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+            <div class="flex justify-between items-start gap-3">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium leading-snug truncate" x-text="book.title"></p>
+                <p class="text-xs text-slate-400 mt-1">
+                  <span x-text="book.size"></span>
+                  <template x-if="book.subtitle">
+                    <span> · <span x-text="book.subtitle"></span></span>
+                  </template>
+                </p>
+              </div>
+              <button
+                @click="sendToRD(book)"
+                class="shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg transition"
+              >
+                Send to RD
+              </button>
+            </div>
+          </li>
+        </template>
+      </ul>
+
+      <!-- Empty state -->
+      <template x-if="!isSearching && !results.length && !searchError">
+        <div class="text-center text-slate-500 mt-16 text-sm">
+          <p class="text-4xl mb-3">🎧</p>
+          <p>Search AudiobookBay above.</p>
+          <p class="mt-1 text-xs">Results are scraped directly — no login needed.</p>
+        </div>
+      </template>
+    </section>
+
+    <!-- QUEUE TAB -->
+    <section x-show="tab === 'queue'">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-sm font-semibold text-slate-300">Download Queue</h2>
+        <button @click="clearQueue()" class="text-xs text-slate-400 hover:text-white">Clear done</button>
+      </div>
+
+      <template x-if="!queue.length">
+        <div class="text-center text-slate-500 mt-16 text-sm">
+          <p class="text-4xl mb-3">📭</p>
+          <p>Queue is empty. Search and send a book to RD.</p>
+        </div>
+      </template>
+
+      <ul class="space-y-3">
+        <template x-for="item in queue" :key="item.id">
+          <li class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+            <div class="flex items-start gap-2">
+              <span class="text-lg" x-text="statusIcon(item.status)"></span>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium truncate" x-text="item.title"></p>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  <span x-text="item.statusLabel || item.status"></span>
+                  <template x-if="item.size"> · <span x-text="item.size"></span></template>
+                </p>
+                <template x-if="item.error">
+                  <p class="text-xs text-red-400 mt-1" x-text="item.error"></p>
+                </template>
+
+                <!-- Progress bar while downloading -->
+                <template x-if="item.status === 'downloading' && item.progress > 0">
+                  <div class="mt-2 bg-slate-700 rounded-full h-1.5">
+                    <div class="bg-indigo-500 h-1.5 rounded-full transition-all" :style="`width:${item.progress}%`"></div>
+                  </div>
+                </template>
+
+                <!-- Download links when ready -->
+                <template x-if="item.status === 'ready' && item.links && item.links.length">
+                  <div class="mt-2 space-y-1">
+                    <template x-for="link in item.links" :key="link.url">
+                      <button
+                        @click="download(link)"
+                        class="w-full text-left text-xs bg-green-900 hover:bg-green-800 text-green-300 px-3 py-2 rounded-lg transition truncate"
+                      >
+                        ⬇️ <span x-text="link.filename || 'Download audiobook'"></span>
+                      </button>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </li>
+        </template>
+      </ul>
+    </section>
+
+    <!-- SETTINGS TAB -->
+    <section x-show="tab === 'settings'" class="space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+        <h2 class="text-sm font-semibold mb-3">Real-Debrid API Key</h2>
+        <p class="text-xs text-slate-400 mb-3">
+          Get your key from
+          <a href="https://real-debrid.com/apitoken" target="_blank" rel="noopener" class="text-indigo-400 underline">real-debrid.com/apitoken</a>.
+          Stored encrypted in IndexedDB — never sent to any server other than Real-Debrid.
+        </p>
+
+        <template x-if="!apiKeySaved">
+          <div class="space-y-2">
+            <input
+              x-model="apiKeyInput"
+              type="password"
+              placeholder="Paste RD API key…"
+              autocomplete="off"
+              class="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              @click="saveKey()"
+              :disabled="!apiKeyInput.trim()"
+              class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white py-3 rounded-xl text-sm font-medium transition"
+            >
+              Save Key
+            </button>
+          </div>
+        </template>
+
+        <template x-if="apiKeySaved">
+          <div class="space-y-2">
+            <p class="text-xs text-green-400">✅ API key is saved and encrypted.</p>
+            <button @click="clearKey()" class="text-xs text-red-400 hover:text-red-300 underline">Remove key</button>
+          </div>
+        </template>
+      </div>
+
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-2">
+        <h2 class="text-sm font-semibold mb-1">About</h2>
+        <p class="text-xs text-slate-400">
+          This app scrapes public metadata from AudiobookBay.lu (no login, no account) and adds torrents to your
+          Real-Debrid premium account for fast HTTPS download.
+        </p>
+        <p class="text-xs text-slate-500 mt-2">
+          ⚠️ You are responsible for the legality of content you download in your jurisdiction.
+        </p>
+      </div>
+
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+        <h2 class="text-sm font-semibold mb-2">Install as App</h2>
+        <p class="text-xs text-slate-400">
+          iOS: <strong>Safari → Share → Add to Home Screen</strong><br/>
+          Works offline; persists without developer account.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Bottom nav ─────────────────────────────────────────────────────────── -->
+  <nav class="fixed bottom-0 inset-x-0 bg-slate-800 border-t border-slate-700 pb-safe z-40">
+    <div class="max-w-lg mx-auto flex">
+      <button
+        @click="tab='search'"
+        :class="tab==='search' ? 'text-indigo-400' : 'text-slate-400'"
+        class="flex-1 flex flex-col items-center py-3 text-xs gap-1 hover:text-indigo-300 transition"
+      >
+        <span class="text-xl">🔍</span>Search
+      </button>
+      <button
+        @click="tab='queue'"
+        :class="tab==='queue' ? 'text-indigo-400' : 'text-slate-400'"
+        class="flex-1 flex flex-col items-center py-3 text-xs gap-1 hover:text-indigo-300 transition relative"
+      >
+        <span class="text-xl">📥</span>Queue
+        <template x-if="queue.filter(i=>i.status!=='ready'&&i.status!=='error').length > 0">
+          <span class="absolute top-2 right-1/4 bg-indigo-500 text-white text-xs w-4 h-4 flex items-center justify-center rounded-full"
+            x-text="queue.filter(i=>i.status!=='ready'&&i.status!=='error').length"></span>
+        </template>
+      </button>
+      <button
+        @click="tab='settings'"
+        :class="tab==='settings' ? 'text-indigo-400' : 'text-slate-400'"
+        class="flex-1 flex flex-col items-center py-3 text-xs gap-1 hover:text-indigo-300 transition"
+      >
+        <span class="text-xl">⚙️</span>Settings
+      </button>
+    </div>
+  </nav>
+
+</body>
+</html>
